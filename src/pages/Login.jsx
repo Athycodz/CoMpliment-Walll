@@ -1,5 +1,11 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { auth, db } from '../firebase';
+import { 
+  createUserWithEmailAndPassword, 
+  signInWithEmailAndPassword 
+} from 'firebase/auth';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 
 export default function Login() {
   const [isLogin, setIsLogin] = useState(true);
@@ -10,6 +16,8 @@ export default function Login() {
     age: ''
   });
   const [mounted, setMounted] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const navigate = useNavigate();
 
   useState(() => {
@@ -23,50 +31,65 @@ export default function Login() {
     });
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    if (isLogin) {
-      // Login logic
-      const users = JSON.parse(localStorage.getItem('users') || '[]');
-      const user = users.find(u => u.email === formData.email && u.password === formData.password);
-      
-      if (user) {
-        localStorage.setItem('currentUser', JSON.stringify(user));
+    setLoading(true);
+    setError('');
+
+    try {
+      if (isLogin) {
+        // LOGIN with Firebase
+        const userCredential = await signInWithEmailAndPassword(
+          auth, 
+          formData.email, 
+          formData.password
+        );
+        
+        console.log('✅ Login successful:', userCredential.user.email);
         navigate('/');
+        
       } else {
-        alert('Invalid email or password');
+        // SIGNUP with Firebase
+        
+        // 1. Create auth account
+        const userCredential = await createUserWithEmailAndPassword(
+          auth,
+          formData.email,
+          formData.password
+        );
+
+        // 2. Save user data to Firestore
+        await setDoc(doc(db, 'users', userCredential.user.uid), {
+          uid: userCredential.user.uid,
+          email: formData.email,
+          username: formData.username,
+          age: formData.age,
+          complimentsReceived: 0,
+          createdAt: new Date().toISOString()
+        });
+
+        console.log('✅ Signup successful:', userCredential.user.email);
+        navigate('/');
       }
-    } else {
-      // Signup logic
-      const users = JSON.parse(localStorage.getItem('users') || '[]');
+    } catch (err) {
+      console.error('❌ Auth error:', err);
       
-      // Check if email already exists
-      if (users.find(u => u.email === formData.email)) {
-        alert('Email already exists');
-        return;
+      // User-friendly error messages
+      if (err.code === 'auth/email-already-in-use') {
+        setError('This email is already registered. Please login instead.');
+      } else if (err.code === 'auth/wrong-password') {
+        setError('Incorrect password. Please try again.');
+      } else if (err.code === 'auth/user-not-found') {
+        setError('No account found with this email. Please sign up.');
+      } else if (err.code === 'auth/weak-password') {
+        setError('Password should be at least 6 characters.');
+      } else if (err.code === 'auth/invalid-email') {
+        setError('Invalid email address.');
+      } else {
+        setError('Something went wrong. Please try again.');
       }
-
-      // Check if username already exists
-      if (users.find(u => u.username === formData.username)) {
-        alert('Username already taken');
-        return;
-      }
-
-      const newUser = {
-        email: formData.email,
-        password: formData.password,
-        username: formData.username,
-        age: formData.age,
-        createdAt: new Date().toISOString()
-      };
-
-      users.push(newUser);
-      localStorage.setItem('users', JSON.stringify(users));
-      localStorage.setItem('currentUser', JSON.stringify(newUser));
-      
-      alert('Account created successfully!');
-      navigate('/');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -87,6 +110,13 @@ export default function Login() {
             {isLogin ? 'Welcome back!' : 'Create your account'}
           </p>
 
+          {/* Error message */}
+          {error && (
+            <div className="mb-6 p-4 bg-red-500/10 border border-red-500/50 rounded-lg">
+              <p className="text-red-400 text-sm">{error}</p>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-6">
             {!isLogin && (
               <>
@@ -100,10 +130,11 @@ export default function Login() {
                     value={formData.username}
                     onChange={handleChange}
                     required
-                    className="w-full px-4 py-3 bg-gray-800/50 border border-gray-700 rounded-lg focus:outline-none focus:border-accent transition-colors text-white"
+                    disabled={loading}
+                    className="w-full px-4 py-3 bg-gray-800/50 border border-gray-700 rounded-lg focus:outline-none focus:border-accent transition-colors text-white disabled:opacity-50"
                     placeholder="Choose a unique username"
                   />
-                  <p className="text-xs text-gray-500 mt-1">This will be hidden from others</p>
+                  <p className="text-xs text-gray-500 mt-1">This will be visible to others</p>
                 </div>
 
                 <div>
@@ -118,7 +149,8 @@ export default function Login() {
                     required
                     min="13"
                     max="120"
-                    className="w-full px-4 py-3 bg-gray-800/50 border border-gray-700 rounded-lg focus:outline-none focus:border-accent transition-colors text-white"
+                    disabled={loading}
+                    className="w-full px-4 py-3 bg-gray-800/50 border border-gray-700 rounded-lg focus:outline-none focus:border-accent transition-colors text-white disabled:opacity-50"
                     placeholder="Enter your age"
                   />
                 </div>
@@ -135,7 +167,8 @@ export default function Login() {
                 value={formData.email}
                 onChange={handleChange}
                 required
-                className="w-full px-4 py-3 bg-gray-800/50 border border-gray-700 rounded-lg focus:outline-none focus:border-accent transition-colors text-white"
+                disabled={loading}
+                className="w-full px-4 py-3 bg-gray-800/50 border border-gray-700 rounded-lg focus:outline-none focus:border-accent transition-colors text-white disabled:opacity-50"
                 placeholder="your@email.com"
               />
             </div>
@@ -151,23 +184,29 @@ export default function Login() {
                 onChange={handleChange}
                 required
                 minLength="6"
-                className="w-full px-4 py-3 bg-gray-800/50 border border-gray-700 rounded-lg focus:outline-none focus:border-accent transition-colors text-white"
+                disabled={loading}
+                className="w-full px-4 py-3 bg-gray-800/50 border border-gray-700 rounded-lg focus:outline-none focus:border-accent transition-colors text-white disabled:opacity-50"
                 placeholder="••••••••"
               />
             </div>
 
             <button
               type="submit"
-              className="w-full bg-accent text-black font-semibold py-3 rounded-lg hover:scale-105 hover:shadow-lg hover:shadow-accent/50 transition-all duration-300"
+              disabled={loading}
+              className="w-full bg-accent text-black font-semibold py-3 rounded-lg hover:scale-105 hover:shadow-lg hover:shadow-accent/50 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
             >
-              {isLogin ? 'Login' : 'Sign Up'}
+              {loading ? 'Please wait...' : (isLogin ? 'Login' : 'Sign Up')}
             </button>
           </form>
 
           <div className="mt-6 text-center">
             <button
-              onClick={() => setIsLogin(!isLogin)}
-              className="text-gray-400 hover:text-accent transition-colors"
+              onClick={() => {
+                setIsLogin(!isLogin);
+                setError('');
+              }}
+              disabled={loading}
+              className="text-gray-400 hover:text-accent transition-colors disabled:opacity-50"
             >
               {isLogin ? "Don't have an account? Sign up" : 'Already have an account? Login'}
             </button>
