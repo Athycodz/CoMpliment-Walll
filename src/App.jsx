@@ -8,6 +8,7 @@ import MouseTrail from './components/MouseTrail';
 import Inbox from "./pages/Inbox";
 import Send from "./pages/Send";
 import Members from "./pages/Members";
+import { auth, db } from './firebase';
 
 export default function App() {
   return (
