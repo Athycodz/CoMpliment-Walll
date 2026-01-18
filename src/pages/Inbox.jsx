@@ -1,145 +1,227 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { auth, db } from '../firebase';
+import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
 
 export default function Inbox() {
-  // Mock data - replace with API call later
-  const [messages] = useState([
-    {
-      id: 1,
-      text: "Your positive energy is contagious! Keep shining bright! ✨",
-      timestamp: "2 hours ago",
-      isRead: false
-    },
-    {
-      id: 2,
-      text: "You have an amazing ability to make everyone feel comfortable and welcome.",
-      timestamp: "5 hours ago",
-      isRead: true
-    },
-    {
-      id: 3,
-      text: "Your creativity and innovative thinking inspire everyone around you!",
-      timestamp: "1 day ago",
-      isRead: true
-    },
-    {
-      id: 4,
-      text: "You're doing an incredible job! Your hard work doesn't go unnoticed.",
-      timestamp: "2 days ago",
-      isRead: true
-    },
-    {
-      id: 5,
-      text: "Your smile literally brightens up the room. Never stop being you! 😊",
-      timestamp: "3 days ago",
-      isRead: true
+  const navigate = useNavigate();
+  const [compliments, setCompliments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('all'); // 'all' or 'unread'
+
+  useEffect(() => {
+    checkAuthAndFetchCompliments();
+  }, []);
+
+  const checkAuthAndFetchCompliments = async () => {
+    // Check if user is logged in
+    if (!auth.currentUser) {
+      console.log('❌ No user logged in, redirecting to login...');
+      navigate('/login');
+      return;
     }
-  ]);
 
-  const [filter, setFilter] = useState('all'); // 'all', 'unread'
+    try {
+      console.log('✅ Fetching compliments for:', auth.currentUser.email);
+      
+      // Query compliments where toUserId matches current user
+      const complimentsRef = collection(db, 'compliments');
+      const q = query(complimentsRef, where('toUserId', '==', auth.currentUser.uid));
+      const querySnapshot = await getDocs(q);
+      
+      const complimentsData = [];
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        complimentsData.push({
+          id: doc.id,
+          ...data,
+          // Calculate time ago
+          timeAgo: calculateTimeAgo(data.timestamp)
+        });
+      });
 
-  const filteredMessages = filter === 'unread' 
-    ? messages.filter(msg => !msg.isRead)
-    : messages;
+      // Sort by newest first
+      complimentsData.sort((a, b) => 
+        new Date(b.timestamp) - new Date(a.timestamp)
+      );
+
+      setCompliments(complimentsData);
+      console.log('✅ Loaded compliments:', complimentsData.length);
+    } catch (error) {
+      console.error('❌ Error fetching compliments:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const calculateTimeAgo = (timestamp) => {
+    if (!timestamp) return 'recently';
+    
+    const now = new Date();
+    const time = new Date(timestamp);
+    const diffMs = now - time;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
+    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+    return time.toLocaleDateString();
+  };
+
+  const markAsRead = async (complimentId) => {
+    try {
+      await updateDoc(doc(db, 'compliments', complimentId), {
+        isRead: true
+      });
+      
+      // Update local state
+      setCompliments(compliments.map(c => 
+        c.id === complimentId ? { ...c, isRead: true } : c
+      ));
+      
+      console.log('✅ Marked compliment as read:', complimentId);
+    } catch (error) {
+      console.error('❌ Error marking as read:', error);
+    }
+  };
+
+  const filteredCompliments = filter === 'unread' 
+    ? compliments.filter(c => !c.isRead)
+    : compliments;
+
+  const unreadCount = compliments.filter(c => !c.isRead).length;
+
+  if (loading) {
+    return (
+      <div className="min-h-screen pt-24 px-4 pb-12 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen pt-24 px-4 pb-12">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
-        <div className="mb-8">
+        <div className="text-center mb-8">
           <h1 className="text-4xl font-bold mb-2">
             Your <span className="text-accent">Compliments</span>
           </h1>
           <p className="text-gray-400">
-            {messages.length} anonymous messages from people who appreciate you
+            {compliments.length} anonymous message{compliments.length !== 1 ? 's' : ''} from people who appreciate you
           </p>
         </div>
 
         {/* Filter Tabs */}
-        <div className="flex gap-4 mb-6">
+        <div className="flex gap-4 mb-8">
           <button
             onClick={() => setFilter('all')}
-            className={`px-6 py-2 rounded-full font-medium transition-all duration-300 ${
+            className={`px-6 py-3 rounded-xl font-semibold transition-all duration-300 ${
               filter === 'all'
                 ? 'bg-accent text-black'
-                : 'bg-gray-800/50 text-gray-400 hover:bg-gray-800'
+                : 'bg-gray-900/40 text-gray-400 hover:bg-gray-900/60'
             }`}
           >
-            All ({messages.length})
+            All ({compliments.length})
           </button>
           <button
             onClick={() => setFilter('unread')}
-            className={`px-6 py-2 rounded-full font-medium transition-all duration-300 ${
+            className={`px-6 py-3 rounded-xl font-semibold transition-all duration-300 ${
               filter === 'unread'
                 ? 'bg-accent text-black'
-                : 'bg-gray-800/50 text-gray-400 hover:bg-gray-800'
+                : 'bg-gray-900/40 text-gray-400 hover:bg-gray-900/60'
             }`}
           >
-            Unread ({messages.filter(m => !m.isRead).length})
+            Unread ({unreadCount})
           </button>
         </div>
 
-        {/* Messages List */}
-        {filteredMessages.length === 0 ? (
+        {/* Compliments List */}
+        {filteredCompliments.length === 0 ? (
           <div className="bg-gray-900/40 backdrop-blur-xl border border-gray-800/50 rounded-2xl p-12 text-center">
-            <div className="w-20 h-20 bg-accent/10 rounded-full flex items-center justify-center mx-auto mb-4">
-              <span className="text-4xl">💌</span>
-            </div>
-            <h3 className="text-xl font-semibold mb-2">No messages yet</h3>
-            <p className="text-gray-400">
-              Share your profile link to start receiving compliments!
+            <div className="text-6xl mb-4">📭</div>
+            <h3 className="text-xl font-semibold text-gray-300 mb-2">
+              {filter === 'unread' ? 'No unread compliments' : 'No compliments yet'}
+            </h3>
+            <p className="text-gray-500 mb-6">
+              {filter === 'unread' 
+                ? 'You\'ve read all your compliments!'
+                : 'Be the first to spread kindness - send compliments to others!'}
             </p>
+            <button
+              onClick={() => navigate('/send')}
+              className="bg-accent hover:bg-accent/90 text-black font-semibold px-6 py-3 rounded-lg transition-all duration-300"
+            >
+              Send a Compliment
+            </button>
           </div>
         ) : (
           <div className="space-y-4">
-            {filteredMessages.map((message, index) => (
+            {filteredCompliments.map((compliment, index) => (
               <div
-                key={message.id}
-                className="group bg-gray-900/40 backdrop-blur-xl border border-gray-800/50 rounded-2xl p-6 hover:border-accent/30 transition-all duration-300 hover:shadow-lg hover:shadow-accent/5"
+                key={compliment.id}
+                className={`group bg-gray-900/40 backdrop-blur-xl border rounded-2xl p-6 transition-all duration-300 hover:border-accent/30 hover:shadow-lg hover:shadow-accent/5 ${
+                  compliment.isRead ? 'border-gray-800/50' : 'border-accent/40'
+                }`}
                 style={{
                   animation: `fadeInUp 0.5s ease-out ${index * 0.1}s both`
                 }}
               >
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-4">
+                  {/* Avatar */}
+                  <div className="w-12 h-12 bg-gradient-to-br from-accent/20 to-accent/5 rounded-full flex items-center justify-center flex-shrink-0">
+                    <span className="text-2xl">✨</span>
+                  </div>
+
+                  {/* Content */}
                   <div className="flex-1">
-                    {/* Anonymous Badge */}
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="w-8 h-8 bg-gradient-to-br from-accent/20 to-accent/5 rounded-full flex items-center justify-center">
-                        <span className="text-sm">🎭</span>
-                      </div>
-                      <span className="text-sm text-gray-400 font-medium">Anonymous</span>
-                      {!message.isRead && (
-                        <span className="bg-accent text-black text-xs font-bold px-2 py-0.5 rounded-full">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="font-semibold text-accent">Anonymous</span>
+                      {!compliment.isRead && (
+                        <span className="bg-accent text-black text-xs font-bold px-2 py-1 rounded">
                           NEW
                         </span>
                       )}
+                      <span className="text-sm text-gray-500 ml-auto">
+                        {compliment.timeAgo}
+                      </span>
                     </div>
 
-                    {/* Message Text */}
-                    <p className="text-gray-200 text-lg leading-relaxed mb-3">
-                      {message.text}
+                    <p className="text-gray-200 text-lg leading-relaxed mb-4">
+                      {compliment.message}
                     </p>
 
-                    {/* Timestamp */}
-                    <p className="text-sm text-gray-500">{message.timestamp}</p>
+                    {!compliment.isRead && (
+                      <button
+                        onClick={() => markAsRead(compliment.id)}
+                        className="text-sm text-accent hover:text-accent/80 transition-colors"
+                      >
+                        Mark as read
+                      </button>
+                    )}
                   </div>
-
-                  {/* Heart Icon */}
-                  <button className="opacity-0 group-hover:opacity-100 transition-opacity duration-300 text-2xl hover:scale-110 transform transition-transform">
-                    ❤️
-                  </button>
                 </div>
               </div>
             ))}
           </div>
         )}
 
-        {/* Stats Footer */}
-        {messages.length > 0 && (
-          <div className="mt-8 p-6 bg-gradient-to-r from-accent/5 to-transparent border border-accent/10 rounded-2xl">
-            <p className="text-gray-400 text-center">
-              You've received <span className="text-accent font-bold">{messages.length}</span> compliments! 
-              Keep spreading positivity! ✨
+        {/* Encouragement Box */}
+        {compliments.length > 0 && (
+          <div className="mt-8 bg-gradient-to-r from-accent/10 to-transparent border border-accent/20 rounded-2xl p-6 text-center">
+            <p className="text-gray-300">
+              💝 You've received {compliments.length} compliment{compliments.length !== 1 ? 's' : ''}! 
+              Why not spread the love?
             </p>
+            <button
+              onClick={() => navigate('/send')}
+              className="mt-4 bg-accent hover:bg-accent/90 text-black font-semibold px-6 py-3 rounded-lg transition-all duration-300"
+            >
+              Send a Compliment
+            </button>
           </div>
         )}
       </div>

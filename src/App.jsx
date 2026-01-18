@@ -6,9 +6,14 @@ import Account from "./pages/Account";
 import HomeButton from "./components/HomeButton";
 import MouseTrail from './components/MouseTrail';
 import Inbox from "./pages/Inbox";
-import Send from "./pages/Send";
+import SendCompliment from "./pages/SendCompliment";  // ← Changed this
 import Members from "./pages/Members";
 import { auth, db } from './firebase';
+
+console.log('🚀 APP.JSX LOADED');
+console.log('Firebase imports:', { auth, db });
+console.log('🚀 APP.JSX LOADED');
+console.log('Firebase imports:', { auth, db });
 
 export default function App() {
   return (
@@ -22,7 +27,7 @@ export default function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/account" element={<Account />} />
             <Route path="/inbox" element={<Inbox />} />
-            <Route path="/send" element={<Send />} />
+            <Route path="/send" element={<SendCompliment />} />
             <Route path="/members" element={<Members />} />
 
           </Routes>

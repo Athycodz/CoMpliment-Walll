@@ -18,11 +18,15 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
-// Add this for debugging
+// Auth state listener for debugging
 auth.onAuthStateChanged((user) => {
   if (user) {
-    console.log('🔐 User is logged in:', user.email, 'UID:', user.uid);
+    console.log('🔐 Auth State: User logged in -', user.email, 'UID:', user.uid);
   } else {
-    console.log('🔓 No user logged in');
+    console.log('🔓 Auth State: No user logged in');
   }
 });
+
+console.log('🔥 FIREBASE.JS FILE LOADED');
+console.log('🔥 Auth object:', auth);
+console.log('🔥 DB object:', db);
