@@ -3,7 +3,6 @@ import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
-// Your Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyDoxDDPtBdf_uWOmmd_Z_rQmCvKHh6E4Ec",
   authDomain: "compliment-wall-9dea2.firebaseapp.com",
@@ -14,9 +13,16 @@ const firebaseConfig = {
   measurementId: "G-KXXEGDFSWD"
 };
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize and export Firebase services
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+
+// Add this for debugging
+auth.onAuthStateChanged((user) => {
+  if (user) {
+    console.log('🔐 User is logged in:', user.email, 'UID:', user.uid);
+  } else {
+    console.log('🔓 No user logged in');
+  }
+});

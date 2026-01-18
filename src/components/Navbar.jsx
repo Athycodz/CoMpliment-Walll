@@ -1,26 +1,28 @@
 import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
+import { auth } from "../firebase";
+import { onAuthStateChanged } from "firebase/auth";
 
 export default function Navbar() {
-  const [isLoggedIn, setIsLoggedIn] = useState(
-    !!localStorage.getItem("currentUser")
-  );
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [activeLink, setActiveLink] = useState("");
 
   useEffect(() => {
-    const syncAuth = () => {
-      setIsLoggedIn(!!localStorage.getItem("currentUser"));
-    };
+    // Listen to Firebase Auth state changes
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setIsLoggedIn(!!user);
+      console.log('🔐 Auth state changed:', user ? `Logged in as ${user.email}` : 'Not logged in');
+    });
+
     const handleScroll = () => {
       setScrolled(window.scrollY > 20);
     };
-    window.addEventListener("auth-change", syncAuth);
-    window.addEventListener("storage", syncAuth);
+
     window.addEventListener("scroll", handleScroll);
+
     return () => {
-      window.removeEventListener("auth-change", syncAuth);
-      window.removeEventListener("storage", syncAuth);
+      unsubscribe();
       window.removeEventListener("scroll", handleScroll);
     };
   }, []);
