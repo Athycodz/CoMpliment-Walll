@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { auth, db } from '../firebase';
 import { collection, addDoc, query, where, getDocs, doc, updateDoc, increment } from 'firebase/firestore';
+import { moderateCompliment, quickFilter } from '../utils/aiModeration';
 
 export default function SendCompliment() {
   const [searchParams] = useSearchParams();
@@ -15,6 +16,11 @@ export default function SendCompliment() {
   const [users, setUsers] = useState([]);
   const [filteredUsers, setFilteredUsers] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  
+  // AI Moderation states
+  const [aiStatus, setAiStatus] = useState(''); // '', 'checking', 'approved', 'rejected'
+  const [aiMessage, setAiMessage] = useState('');
+  const [aiConfidence, setAiConfidence] = useState(0); // NEW: AI confidence score
 
   // Fetch all users for autocomplete
   useEffect(() => {
@@ -59,6 +65,41 @@ export default function SendCompliment() {
     }
   };
 
+  // NEW: Confetti animation function
+  const triggerConfetti = () => {
+    const duration = 3 * 1000;
+    const animationEnd = Date.now() + duration;
+    const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 0 };
+
+    function randomInRange(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    const interval = setInterval(function() {
+      const timeLeft = animationEnd - Date.now();
+
+      if (timeLeft <= 0) {
+        return clearInterval(interval);
+      }
+
+      const particleCount = 50 * (timeLeft / duration);
+      
+      // Create confetti elements
+      const confettiElements = [];
+      for (let i = 0; i < particleCount; i++) {
+        const confetti = document.createElement('div');
+        confetti.className = 'confetti-particle';
+        confetti.style.left = randomInRange(0, 100) + '%';
+        confetti.style.animationDuration = randomInRange(2, 4) + 's';
+        confetti.style.backgroundColor = ['#FF6B6B', '#4ECDC4', '#FFE66D', '#A8E6CF', '#FF8B94'][Math.floor(Math.random() * 5)];
+        document.body.appendChild(confetti);
+        confettiElements.push(confetti);
+        
+        setTimeout(() => confetti.remove(), 4000);
+      }
+    }, 250);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -74,11 +115,49 @@ export default function SendCompliment() {
     setLoading(true);
     setError('');
     setSuccess(false);
+    setAiStatus('');
+    setAiMessage('');
+    setAiConfidence(0);
 
     try {
+      // Quick client-side validation first
+      console.log('🔍 Step 0: Running quick filter...');
+      const quickCheck = quickFilter(message.trim());
+      if (!quickCheck.valid) {
+        console.log('❌ Quick filter failed:', quickCheck.reason);
+        setError(quickCheck.reason);
+        setLoading(false);
+        return;
+      }
+
+      // AI Moderation
+      console.log('🤖 Step 0.5: Running AI moderation...');
+      setAiStatus('checking');
+      setAiMessage('AI is checking your compliment...');
+      
+      const aiResult = await moderateCompliment(message.trim());
+      console.log('AI Result:', aiResult);
+      
+      // NEW: Store AI confidence if available
+      if (aiResult.confidence) {
+        setAiConfidence(aiResult.confidence);
+      }
+      
+      if (aiResult.status === 'rejected') {
+        console.log('❌ AI rejected compliment:', aiResult.reason);
+        setAiStatus('rejected');
+        setError(`❌ ${aiResult.reason || 'Your message was flagged by our AI. Please try a more genuine, positive compliment.'}`);
+        setLoading(false);
+        return;
+      }
+      
+      setAiStatus('approved');
+      setAiMessage('✅ AI approved! Sending...');
+      console.log('✅ AI approved compliment');
+      
       console.log('🔍 Step 1: Finding recipient...', recipientUsername);
       
-      // 1. Find recipient by username
+      // Find recipient by username
       const usersRef = collection(db, 'users');
       const q = query(usersRef, where('username', '==', recipientUsername.trim()));
       const querySnapshot = await getDocs(q);
@@ -96,7 +175,7 @@ export default function SendCompliment() {
       
       console.log('✅ Found recipient:', recipientData.username, 'ID:', recipientId);
 
-      // 2. Check if trying to send to yourself
+      // Check if trying to send to yourself
       if (recipientId === auth.currentUser.uid) {
         console.log('❌ Cannot send to self');
         setError("You can't send a compliment to yourself!");
@@ -104,7 +183,7 @@ export default function SendCompliment() {
         return;
       }
 
-      // 3. Basic validation
+      // Basic validation
       if (message.trim().length < 10) {
         setError('Compliment must be at least 10 characters long');
         setLoading(false);
@@ -120,14 +199,17 @@ export default function SendCompliment() {
       console.log('🔍 Step 2: Saving compliment to Firestore...');
       console.log('Message:', message.trim());
       
-      // 4. Save compliment to Firestore
+      // Save compliment to Firestore with AI moderation data
       const complimentData = {
         toUserId: recipientId,
         toUsername: recipientData.username,
         message: message.trim(),
         timestamp: new Date().toISOString(),
         isRead: false,
-        moderationStatus: 'approved'
+        moderationStatus: 'approved',
+        aiModerated: true,
+        aiReason: aiResult.reason || 'Passed AI check',
+        aiConfidence: aiResult.confidence || 0.95 // NEW: Store confidence
       };
       
       console.log('Compliment data:', complimentData);
@@ -138,7 +220,7 @@ export default function SendCompliment() {
 
       console.log('🔍 Step 3: Updating recipient compliment count...');
       
-      // 5. Update recipient's compliment count
+      // Update recipient's compliment count
       await updateDoc(doc(db, 'users', recipientId), {
         complimentsReceived: increment(1)
       });
@@ -147,14 +229,18 @@ export default function SendCompliment() {
       console.log('✅✅✅ Compliment sent successfully to:', recipientData.username);
       
       setSuccess(true);
+      setAiStatus('');
       setMessage('');
       setRecipientUsername('');
 
-      // Redirect after 2 seconds
+      // NEW: Trigger confetti animation!
+      triggerConfetti();
+
+      // Redirect after 4 seconds (2 + 2 more)
       setTimeout(() => {
         console.log('🔄 Redirecting to inbox...');
         navigate('/inbox');
-      }, 2000);
+      }, 4000);
 
     } catch (error) {
       console.error('❌❌❌ DETAILED ERROR:', error);
@@ -162,6 +248,7 @@ export default function SendCompliment() {
       console.error('Error message:', error.message);
       console.error('Full error object:', JSON.stringify(error, null, 2));
       setError('Failed to send compliment. Please try again.');
+      setAiStatus('');
     } finally {
       setLoading(false);
     }
@@ -193,18 +280,42 @@ export default function SendCompliment() {
           </p>
         </div>
 
+        {/* AI Status Message */}
+        {aiStatus === 'checking' && (
+          <div className="mb-6 p-4 bg-blue-500/10 border border-blue-500/50 rounded-lg animate-fadeIn flex items-center gap-3">
+            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500"></div>
+            <p className="text-blue-400">🤖 {aiMessage}</p>
+          </div>
+        )}
+
+        {/* NEW: AI Confidence Score */}
+        {aiStatus === 'approved' && aiConfidence > 0 && (
+          <div className="mb-6 p-3 bg-green-500/10 border border-green-500/50 rounded-lg animate-fadeIn">
+            <div className="flex items-center justify-between">
+              <p className="text-green-400 text-sm">✅ AI Approved with Confidence:</p>
+              <p className="text-green-400 font-bold text-lg">{(aiConfidence * 100).toFixed(0)}%</p>
+            </div>
+            <div className="mt-2 w-full bg-gray-700 rounded-full h-2">
+              <div 
+                className="bg-green-500 h-2 rounded-full transition-all duration-500"
+                style={{ width: `${aiConfidence * 100}%` }}
+              ></div>
+            </div>
+          </div>
+        )}
+
         {/* Success Message */}
         {success && (
-          <div className="mb-6 p-4 bg-green-500/10 border border-green-500/50 rounded-lg animate-fadeIn">
-            <p className="text-green-400 text-center">
-              ✅ Compliment sent successfully! Redirecting...
+          <div className="mb-6 p-4 bg-green-500/10 border border-green-500/50 rounded-lg animate-fadeIn animate-bounce-once">
+            <p className="text-green-400 text-center text-lg font-semibold">
+              🎉 Compliment sent successfully! Redirecting...
             </p>
           </div>
         )}
 
         {/* Error Message */}
         {error && (
-          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/50 rounded-lg">
+          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/50 rounded-lg animate-shake">
             <p className="text-red-400 text-center">{error}</p>
           </div>
         )}
@@ -256,6 +367,7 @@ export default function SendCompliment() {
           <div className="mb-6">
             <label className="block text-sm font-medium text-gray-300 mb-2">
               Your Compliment
+              <span className="ml-2 text-xs text-blue-400 animate-pulse">🤖 AI-Moderated</span>
             </label>
             <textarea
               value={message}
@@ -269,7 +381,9 @@ export default function SendCompliment() {
             />
             <div className="flex justify-between items-center mt-2">
               <p className="text-xs text-gray-500">Minimum 10 characters</p>
-              <p className="text-xs text-gray-500">{message.length}/500 characters</p>
+              <p className={`text-xs ${message.length > 450 ? 'text-yellow-400' : 'text-gray-500'}`}>
+                {message.length}/500 characters
+              </p>
             </div>
           </div>
 
@@ -285,7 +399,7 @@ export default function SendCompliment() {
                   type="button"
                   onClick={() => setMessage(example)}
                   disabled={loading}
-                  className="px-3 py-2 bg-gray-800/50 hover:bg-accent/10 border border-gray-700 hover:border-accent/50 rounded-lg text-xs text-gray-400 hover:text-accent transition-all disabled:opacity-50"
+                  className="px-3 py-2 bg-gray-800/50 hover:bg-accent/10 border border-gray-700 hover:border-accent/50 rounded-lg text-xs text-gray-400 hover:text-accent transition-all disabled:opacity-50 hover:scale-105"
                 >
                   {example}
                 </button>
@@ -296,22 +410,25 @@ export default function SendCompliment() {
           {/* Submit Button */}
           <button
             type="submit"
-            disabled={loading || !recipientUsername.trim() || message.trim().length < 10}
+            disabled={loading || aiStatus === 'checking' || !recipientUsername.trim() || message.trim().length < 10}
             className="w-full bg-accent hover:bg-accent/90 text-black font-semibold py-4 rounded-lg transition-all duration-300 hover:scale-105 hover:shadow-lg hover:shadow-accent/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
           >
-            {loading ? 'Sending...' : 'Send Compliment ✨'}
+            {aiStatus === 'checking' ? '🤖 AI Checking...' : 
+             loading ? 'Sending...' : 
+             'Send Compliment ✨'}
           </button>
         </form>
 
         {/* Info Box */}
         <div className="mt-8 bg-gray-900/40 backdrop-blur-xl border border-gray-800/50 rounded-2xl p-6">
-          <h3 className="text-lg font-semibold text-accent mb-3">📝 Guidelines</h3>
+          <h3 className="text-lg font-semibold text-accent mb-3">📝 Guidelines (AI-Enforced)</h3>
           <ul className="space-y-2 text-sm text-gray-400">
             <li>✅ Be genuine and specific</li>
             <li>✅ Focus on positive qualities or actions</li>
             <li>❌ No generic messages like "nice" or "cool"</li>
             <li>❌ No romantic or flirty content</li>
             <li>❌ No sarcasm or backhanded compliments</li>
+            <li className="text-blue-400 font-medium">🤖 All messages are AI-moderated for quality</li>
           </ul>
         </div>
       </div>
@@ -323,6 +440,43 @@ export default function SendCompliment() {
         }
         .animate-fadeIn {
           animation: fadeIn 0.3s ease-out;
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+        .animate-spin {
+          animation: spin 1s linear infinite;
+        }
+        @keyframes bounce-once {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-10px); }
+        }
+        .animate-bounce-once {
+          animation: bounce-once 0.6s ease-in-out;
+        }
+        @keyframes shake {
+          0%, 100% { transform: translateX(0); }
+          25% { transform: translateX(-10px); }
+          75% { transform: translateX(10px); }
+        }
+        .animate-shake {
+          animation: shake 0.4s ease-in-out;
+        }
+        
+        /* Confetti styles */
+        .confetti-particle {
+          position: fixed;
+          width: 10px;
+          height: 10px;
+          top: -10px;
+          z-index: 9999;
+          animation: confetti-fall linear forwards;
+        }
+        @keyframes confetti-fall {
+          to {
+            transform: translateY(100vh) rotate(720deg);
+            opacity: 0;
+          }
         }
       `}</style>
     </div>
