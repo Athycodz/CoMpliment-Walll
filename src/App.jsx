@@ -6,7 +6,7 @@ import Account from "./pages/Account";
 import HomeButton from "./components/HomeButton";
 import MouseTrail from './components/MouseTrail';
 import Inbox from "./pages/Inbox";
-import SendCompliment from "./pages/SendCompliment";  // ← Changed this
+import SendCompliment from "./pages/SendCompliment"; 
 import Members from "./pages/Members";
 import { auth, db } from './firebase';
 
